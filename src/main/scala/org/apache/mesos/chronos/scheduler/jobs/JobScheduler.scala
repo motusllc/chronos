@@ -292,9 +292,9 @@ class JobScheduler @Inject()(val scheduleHorizon: Period,
       job match {
         case job: ScheduleBasedJob =>
           val scheduleBasedJob: ScheduleBasedJob = newJob.asInstanceOf[ScheduleBasedJob]
-          Iso8601Expressions.parse(scheduleBasedJob.schedule, scheduleBasedJob.scheduleTimeZone) match {
-            case Some((recurrences, _, _)) =>
-              if (recurrences == 0) {
+          ScheduleExpressions.parse(scheduleBasedJob.schedule, scheduleBasedJob.scheduleTimeZone) match {
+            case Some(sch) =>
+              if (sch.recurrences == 0) {
                 log.info("Disabling job that reached a zero-recurrence count!")
 
                 val disabledJob: ScheduleBasedJob = scheduleBasedJob.copy(disabled = true)
@@ -533,10 +533,10 @@ class JobScheduler @Inject()(val scheduleHorizon: Period,
    */
   @tailrec
   final def next(now: DateTime, stream: ScheduleStream): (Option[ScheduledTask], Option[ScheduleStream]) = {
-    val (schedule, jobName, scheduleTimeZone) = stream.head()
+    val (schedule, jobName) = stream.head()
 
-    log.info("Calling next for stream: %s, jobname: %s".format(stream.schedule, jobName))
-    assert(schedule != null && !schedule.equals(""), "No valid schedule found: " + schedule)
+    log.info("Calling next for stream: %s, jobname: %s".format(stream.schedule.scheduleString, jobName))
+    assert(schedule != null, "No valid schedule found: " + schedule)
     assert(jobName != null, "BaseJob cannot be null")
 
     var jobOption: Option[BaseJob] = None
@@ -555,29 +555,28 @@ class JobScheduler @Inject()(val scheduleHorizon: Period,
         log.warning(s"Corrupt job in stream for $jobName")
     }
 
-    Iso8601Expressions.parse(schedule, scheduleTimeZone) match {
-      case Some((recurrences, nextDate, _)) =>
-        log.finest("Recurrences: '%d', next date: '%s'".format(recurrences, stream.schedule))
+    if (schedule != null) {
+        log.finest("Recurrences: '%d', next date: '%s'".format(schedule.recurrences, schedule.nextRun))
         //nextDate has to be > (now - epsilon) & < (now + timehorizon) , for it to be scheduled!
-        if (recurrences == 0) {
+        if (schedule.recurrences == 0) {
           log.info("Finished all recurrences of job '%s'".format(jobName))
           //We're not removing the job here because it may still be required if a pending task fails.
           (None, None)
         } else {
           val job = jobOption.get
-          if (nextDate.isAfter(now.minus(job.epsilon)) && nextDate.isBefore(now.plus(scheduleHorizon))) {
-            log.info("Task ready for scheduling: %s".format(nextDate))
+          if (schedule.nextRun.isAfter(now.minus(job.epsilon)) && schedule.nextRun.isBefore(now.plus(scheduleHorizon))) {
+            log.info("Task ready for scheduling: %s".format(schedule.nextRun))
             //TODO(FL): Rethink passing the dispatch queue all the way down to the ScheduledTask.
-            val task = new ScheduledTask(TaskUtils.getTaskId(job, nextDate), nextDate, job, taskManager)
+            val task = new ScheduledTask(TaskUtils.getTaskId(job, schedule.nextRun), schedule.nextRun, job, taskManager)
             return (Some(task), stream.tail())
           }
           //The nextDate has passed already beyond epsilon.
           //TODO(FL): Think about the semantics here and see if it always makes sense to skip ahead of missed schedules.
-          if (!nextDate.isBefore(now)) {
+          if (!schedule.nextRun.isBefore(now)) {
             return (None, Some(stream))
           }
           //Needs to be scheduled at a later time, after schedule horizon.
-          log.fine("No need to work on schedule: '%s' yet".format(nextDate))
+          log.fine("No need to work on schedule: '%s' yet".format(schedule.nextRun))
           val tail = stream.tail()
           if (tail.isEmpty) {
             //TODO(FL): Verify that this can go.
@@ -589,7 +588,8 @@ class JobScheduler @Inject()(val scheduleHorizon: Period,
             next(now, tail.get)
           }
         }
-      case None =>
+    }
+    else {
         log.warning(s"Couldn't parse date for $jobName")
         (None, Some(stream))
     }
@@ -717,7 +717,7 @@ class JobScheduler @Inject()(val scheduleHorizon: Period,
        */
       encapsulatedJob match {
         case job: ScheduleBasedJob =>
-          val updatedJob = job.copy(stream.get.schedule)
+          val updatedJob = job.copy(stream.get.schedule.scheduleString)
           log.info("Saving updated job:" + updatedJob)
           persistenceStore.persistJob(updatedJob)
           jobGraph.replaceVertex(encapsulatedJob, updatedJob)

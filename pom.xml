@@ -34,6 +34,7 @@
     <mesos-utils.version>0.22.0-1</mesos-utils.version>
     <metrics.version>3.1.0</metrics.version>
     <raven.version>4.1.2</raven.version>
+    <scala-cron.version>1.0.0</scala-cron.version>
 
     <!-- test deps versions -->
     <junit.version>4.11</junit.version>
@@ -206,6 +207,12 @@
       <artifactId>commons-math3</artifactId>
       <version>${commons-math3.version}</version>
     </dependency>
+	
+	<dependency>
+	    <groupId>com.github.buster84</groupId>
+	    <artifactId>scala-cron_2.11</artifactId>
+	    <version>${scala-cron.version}</version>
+	</dependency>
 
     <!-- Test scope -->
     <dependency>

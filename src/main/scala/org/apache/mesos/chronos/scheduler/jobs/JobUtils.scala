@@ -101,12 +101,12 @@ object JobUtils {
   }
 
   def makeScheduleStream(job: ScheduleBasedJob, dateTime: DateTime) = {
-    Iso8601Expressions.parse(job.schedule, job.scheduleTimeZone) match {
-      case Some((_, scheduledTime, _)) =>
-        if (scheduledTime.plus(job.epsilon).isBefore(dateTime)) {
-          skipForward(job, dateTime)
+    ScheduleExpressions.parse(job.schedule, job.scheduleTimeZone) match {
+      case Some(sch) =>
+        if (sch.nextRun.plus(job.epsilon).isBefore(dateTime)) {
+          None // skipForward(sch, job.name)
         } else {
-          Some(new ScheduleStream(job.schedule, job.name, job.scheduleTimeZone))
+          Some(new ScheduleStream(sch, job.name))
         }
       case None =>
         None
@@ -114,26 +114,10 @@ object JobUtils {
   }
 
   def skipForward(job: ScheduleBasedJob, dateTime: DateTime): Option[ScheduleStream] = {
-    Iso8601Expressions.parse(job.schedule, job.scheduleTimeZone) match {
-      case Some((rec, start, per)) =>
-        val skip = calculateSkips(dateTime, start, per)
-        if (rec == -1) {
-          val nStart = start.plus(per.multipliedBy(skip))
-          log.warning("Skipped forward %d iterations, modified start from '%s' to '%s"
-            .format(skip, start.toString(DateTimeFormat.fullDate),
-              nStart.toString(DateTimeFormat.fullDate)))
-          Some(new ScheduleStream(Iso8601Expressions.create(rec, nStart, per), job.name, job.scheduleTimeZone))
-        } else if (rec < skip) {
-          log.warning("Filtered job as it is no longer valid.")
-          None
-        } else {
-          val nRec = rec - skip
-          val nStart = start.plus(per.multipliedBy(skip))
-          log.warning("Skipped forward %d iterations, iterations is now '%d' , modified start from '%s' to '%s"
-            .format(skip, nRec, start.toString(DateTimeFormat.fullDate),
-              nStart.toString(DateTimeFormat.fullDate)))
-          Some(new ScheduleStream(Iso8601Expressions.create(nRec, nStart, per), job.name, job.scheduleTimeZone))
-        }
+    val schedule = ScheduleExpressions.parse(job.schedule, job.scheduleTimeZone)
+    ScheduleExpressions.next(schedule.get, dateTime) match {
+      case Some(sch) =>
+          Some(new ScheduleStream(sch, job.name))
       case None =>
         None
     }
